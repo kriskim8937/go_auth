@@ -22,12 +22,6 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{Service: service}
 }
 
-// Token handles the token exchange for the authorization code flow
-func (h *Handler) Token(c *gin.Context) {
-	// Implement token exchange logic here
-	c.JSON(http.StatusOK, gin.H{"access_token": "dummy_access_token"})
-}
-
 // UserInfo handles user information retrieval based on the access token
 func (h *Handler) UserInfo(c *gin.Context) {
 	// Validate the access token and return user info
@@ -40,6 +34,19 @@ type AuthorizationRequest struct {
 	ResponseType string `form:"response_type" binding:"required"`
 	Scope        string `form:"scope"`
 	State        string `form:"state"`
+}
+
+type TokenRequest struct {
+	GrantType   string `form:"grant_type" binding:"required"`
+	Code        string `form:"code" binding:"required"`
+	ClientID    string `form:"client_id" binding:"required"`
+	RedirectURI string `form:"redirect_uri" binding:"required"`
+}
+
+type TokenResponse struct {
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
+	ExpiresIn   int64  `json:"expires_in"`
 }
 
 var authorizationCodes = make(map[string]string) // In-memory store for demo purposes
@@ -81,4 +88,42 @@ func isValidClient(clientID string) bool {
 		}
 	}
 	return false
+}
+
+// Token handles the token exchange for the authorization code flow
+func (h *Handler) Token(c *gin.Context) {
+	var request TokenRequest
+	if err := c.ShouldBindQuery(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+
+	// Step 1: Validate grant type
+	if request.GrantType != "authorization_code" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unsupported grant type"})
+		return
+	}
+
+	// Step 2: Check the authorization code
+	clientID := request.ClientID
+	storedClientID, exists := authorizationCodes[request.Code]
+	if !exists || storedClientID != clientID {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired authorization code"})
+		return
+	}
+
+	// Step 3: Generate access token
+	accessToken := uuid.New().String()
+	expiresIn := int64(3600) // Token expiration in seconds (e.g., 1 hour)
+
+	// Step 4: Return the access token
+	response := TokenResponse{
+		AccessToken: accessToken,
+		TokenType:   "Bearer",
+		ExpiresIn:   expiresIn,
+	}
+	c.JSON(http.StatusOK, response)
+
+	// Optionally, you could also invalidate the authorization code after use
+	delete(authorizationCodes, request.Code)
 }
