@@ -83,7 +83,7 @@ Secure the endpoints and integrate with third-party OAuth providers.
 |--------|-------------|
 | Project Setup    | ✅ Done     |
 | Implemented Authorization Code Flow   | ✅ Done   |
-| Implement Client Credentials Flow	| 🔄 In Progress |
+| Implement Client Credentials Flow	| ✅ Done |
 | Store & Manage Tokens Securely (Redis/PostgreSQL)	| 🔄 In Progress |
 | Implement Token Revocation	| ⏳ Not Started |
 | Implement Refresh Tokens	 | ⏳ Not Started |

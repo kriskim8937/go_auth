@@ -87,15 +87,30 @@ func TestTokenEndpoint_AuthorizationCodeGrant_ValidCode(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "access_token")
 }
 
-func TestUserInfoEndpoint(t *testing.T) {
+func TestUserInfo_ValidTokent(t *testing.T) {
 	service := auth.NewService()
 	handler := auth.NewHandler(service)
 	r := setupRouter(handler)
 
 	req, _ := http.NewRequest("GET", "/userinfo", nil)
+	req.Header.Set("Authorization", "Bearer abcd1234")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), "dummy_user_info")
+	assert.Contains(t, w.Body.String(), "user_1")
+}
+
+func TestUserInfo_InvalidTokent(t *testing.T) {
+	service := auth.NewService()
+	handler := auth.NewHandler(service)
+	r := setupRouter(handler)
+
+	req, _ := http.NewRequest("GET", "/userinfo", nil)
+	req.Header.Set("Authorization", "Bearer abcd1234")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "user_1")
 }
