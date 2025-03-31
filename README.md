@@ -13,22 +13,19 @@ AuthFlow is a lightweight authentication and authorization service implementing 
 ## Project Structure
 ```
 authflow/
-│── cmd/
-│   ├── server/            # Main server entry point
-│   ├── migrate/           # Database migration scripts
-│── config/
-│   ├── config.go          # Configuration handling
-│── internal/
-│   ├── auth/              # OAuth 2.1 authentication logic
-│   ├── handlers/          # API handlers
-│   ├── models/            # Database models
-│   ├── storage/           # PostgreSQL token storage
-│── scripts/
-│   ├── docker/            # Docker setup and deployment
+├── internal/
+│   ├── auth/
+│   │   ├── handler.go     # API endpoints
+│   │   ├── service.go     # Business logic
+│   │   ├── storage.go     # Token storage (to be implemented)
+│   │   ├── models.go      # Data structures
+│   ├── middleware/        # Security & authentication middleware
+├── main.go                # Entry point
+├── Dockerfile             # Containerization setup
+├── docker-compose.yml     # Local development setup
 │── .env                   # Environment variables
 │── go.mod                 # Go module file
 │── main.go                # Entry point
-│── Dockerfile             # Docker containerization
 │── README.md              # Documentation
 ```
 
@@ -80,3 +77,15 @@ Implement OAuth 2.1 flows (authorization code, client credentials).
 Add PostgreSQL for token storage.
 
 Secure the endpoints and integrate with third-party OAuth providers.
+
+## 🚀 Project TODO List
+| Task | Status     |
+|--------|-------------|
+| Project Setup    | ✅ Done     |
+| Implemented Authorization Code Flow   | ✅ Done   |
+| Implement Client Credentials Flow	| 🔄 In Progress |
+| Store & Manage Tokens Securely (Redis/PostgreSQL)	| 🔄 In Progress |
+| Implement Token Revocation	| ⏳ Not Started |
+| Implement Refresh Tokens	 | ⏳ Not Started |
+| Secure API with Middleware (Token Validation)	| ⏳ Not Started |
+| Deploy to Cloud (Google Cloud Run, Kubernetes)	|⏳ Not Started |
