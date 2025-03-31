@@ -72,3 +72,11 @@ Contributions are welcome! Please open an issue or submit a pull request.
 ## License
 MIT License
 
+## TODO
+This is the starting point for your OAuth 2.1 authentication service in Go using the Gin framework. Next steps:
+
+Implement OAuth 2.1 flows (authorization code, client credentials).
+
+Add PostgreSQL for token storage.
+
+Secure the endpoints and integrate with third-party OAuth providers.
