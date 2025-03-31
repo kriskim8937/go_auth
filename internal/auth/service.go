@@ -1,17 +1,38 @@
 package auth
 
-// Responsibility: Contains the business logic and interacts with the data layer (e.g., databases, external APIs).
-
-// Role: The Service processes data, performs operations, and contains the core functionality needed for the application. It is where the actual authentication logic and OAuth flow implementations reside.
-
-// Example: In your service.go, you can implement methods for generating access tokens, validating them, and managing users.
+import (
+	"sync"
+)
 
 // Service provides methods for handling OAuth logic
-type Service struct{}
+type Service struct {
+	mu                 sync.Mutex
+	authorizationCodes map[string]string
+}
 
 // NewService creates a new authentication service
 func NewService() *Service {
-	return &Service{}
+	return &Service{
+		authorizationCodes: make(map[string]string),
+	}
 }
 
-// Here you can add methods to handle OAuth logic like token generation, validation, etc.
+// StoreAuthorizationCode saves an authorization code for a client
+func (s *Service) StoreAuthorizationCode(code, clientID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.authorizationCodes[code] = clientID
+}
+
+// ValidateAndRemoveAuthorizationCode checks and removes an authorization code
+func (s *Service) ValidateAndRemoveAuthorizationCode(code, clientID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	storedClientID, exists := s.authorizationCodes[code]
+	if !exists || storedClientID != clientID {
+		return false
+	}
+	delete(s.authorizationCodes, code) // Remove after successful validation
+	return true
+}

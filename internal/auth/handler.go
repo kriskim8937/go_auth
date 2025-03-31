@@ -1,12 +1,5 @@
 package auth
 
-// 1. Handler
-// Responsibility: Handles HTTP requests and responses. It acts as the entry point for incoming API calls.
-
-// Role: The Handler parses requests, invokes appropriate methods on the Service, and sends back responses.
-
-// Example: In your handler.go, the Authorize, Token, and UserInfo methods receive HTTP requests, call the corresponding service methods, and return JSON responses.
-
 import (
 	"net/http"
 
@@ -24,7 +17,7 @@ func NewHandler(service *Service) *Handler {
 
 // UserInfo handles user information retrieval based on the access token
 func (h *Handler) UserInfo(c *gin.Context) {
-	// Validate the access token and return user info
+	// TODO: Implement token validation logic
 	c.JSON(http.StatusOK, gin.H{"user": "dummy_user_info"})
 }
 
@@ -49,8 +42,6 @@ type TokenResponse struct {
 	ExpiresIn   int64  `json:"expires_in"`
 }
 
-var authorizationCodes = make(map[string]string) // In-memory store for demo purposes
-
 // Authorize handles the authorization code flow
 func (h *Handler) Authorize(c *gin.Context) {
 	var request AuthorizationRequest
@@ -59,17 +50,16 @@ func (h *Handler) Authorize(c *gin.Context) {
 		return
 	}
 
-	// Step 1: Validate the client (this should check against a database in production)
 	if !isValidClient(request.ClientID) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid client"})
 		return
 	}
 
-	// Step 2: Generate an authorization code
+	// Generate and store authorization code
 	code := uuid.New().String()
-	authorizationCodes[code] = request.ClientID // Store code with associated client ID
+	h.Service.StoreAuthorizationCode(code, request.ClientID)
 
-	// Step 3: Redirect the user with the authorization code
+	// Redirect user with the code
 	redirectURL := request.RedirectURI + "?code=" + code
 	if request.State != "" {
 		redirectURL += "&state=" + request.State
@@ -78,9 +68,7 @@ func (h *Handler) Authorize(c *gin.Context) {
 	c.Redirect(http.StatusFound, redirectURL)
 }
 
-// isValidClient checks if the client ID is valid
 func isValidClient(clientID string) bool {
-	// Placeholder validation; replace with real validation against a database
 	validClients := []string{"client_id_1", "client_id_2"}
 	for _, id := range validClients {
 		if id == clientID {
@@ -90,40 +78,56 @@ func isValidClient(clientID string) bool {
 	return false
 }
 
-// Token handles the token exchange for the authorization code flow
+// Token handles token exchange
 func (h *Handler) Token(c *gin.Context) {
 	var request TokenRequest
-	if err := c.ShouldBindQuery(&request); err != nil {
+	if err := c.ShouldBind(&request); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
 		return
 	}
 
-	// Step 1: Validate grant type
-	if request.GrantType != "authorization_code" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Unsupported grant type"})
-		return
+	switch request.GrantType {
+	case "authorization_code":
+		h.handleAuthorizationCodeGrant(c, request)
+	case "client_credentials":
+		h.handleClientCredentialsGrant(c)
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported_grant_type"})
 	}
+}
 
-	// Step 2: Check the authorization code
-	clientID := request.ClientID
-	storedClientID, exists := authorizationCodes[request.Code]
-	if !exists || storedClientID != clientID {
+func (h *Handler) handleAuthorizationCodeGrant(c *gin.Context, request TokenRequest) {
+	if !h.Service.ValidateAndRemoveAuthorizationCode(request.Code, request.ClientID) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired authorization code"})
 		return
 	}
 
-	// Step 3: Generate access token
+	// Generate access token
 	accessToken := uuid.New().String()
-	expiresIn := int64(3600) // Token expiration in seconds (e.g., 1 hour)
+	expiresIn := int64(3600)
 
-	// Step 4: Return the access token
-	response := TokenResponse{
+	c.JSON(http.StatusOK, TokenResponse{
 		AccessToken: accessToken,
 		TokenType:   "Bearer",
 		ExpiresIn:   expiresIn,
-	}
-	c.JSON(http.StatusOK, response)
+	})
+}
 
-	// Optionally, you could also invalidate the authorization code after use
-	delete(authorizationCodes, request.Code)
+func (h *Handler) handleClientCredentialsGrant(c *gin.Context) {
+	clientID := c.PostForm("client_id")
+	clientSecret := c.PostForm("client_secret")
+
+	if clientID != "valid-client-id" || clientSecret != "valid-client-secret" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_client"})
+		return
+	}
+
+	// Generate access token
+	accessToken := uuid.New().String()
+
+	c.JSON(http.StatusOK, TokenResponse{
+		AccessToken: accessToken,
+		TokenType:   "Bearer",
+		ExpiresIn:   3600,
+	})
 }
