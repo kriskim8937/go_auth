@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"errors"
 	"net/http"
 	"strings"
 
@@ -17,16 +16,13 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{Service: service}
 }
 
-// UserInfo handles user information retrieval based on the access token
 func (h *Handler) UserInfo(c *gin.Context) {
-	// Extract the access token from the Authorization header
 	authHeader := c.GetHeader("Authorization")
 	if authHeader == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing access token"})
 		return
 	}
 
-	// Ensure the token follows the "Bearer <token>" format
 	parts := strings.Split(authHeader, " ")
 	if len(parts) != 2 || parts[0] != "Bearer" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token format"})
@@ -34,31 +30,13 @@ func (h *Handler) UserInfo(c *gin.Context) {
 	}
 
 	accessToken := parts[1]
-
-	// Validate the token
 	userInfo, err := h.Service.ValidateAccessToken(accessToken)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
 		return
 	}
 
-	// Return user information
 	c.JSON(http.StatusOK, gin.H{"user": userInfo})
-}
-
-func (s *Service) ValidateAccessToken(token string) (string, error) {
-	// Simulating token validation (Replace with actual logic, e.g., checking a database)
-	validTokens := map[string]string{
-		"abcd1234": "user_1",
-		"xyz7890":  "user_2",
-	}
-
-	user, exists := validTokens[token]
-	if !exists {
-		return "", errors.New("invalid token")
-	}
-
-	return user, nil
 }
 
 type AuthorizationRequest struct {
@@ -142,9 +120,11 @@ func (h *Handler) handleAuthorizationCodeGrant(c *gin.Context, request TokenRequ
 		return
 	}
 
-	// Generate access token
+	// Generate and store access token
 	accessToken := uuid.New().String()
 	expiresIn := int64(3600)
+
+	h.Service.StoreAccessToken(accessToken, request.ClientID, expiresIn)
 
 	c.JSON(http.StatusOK, TokenResponse{
 		AccessToken: accessToken,

@@ -1,0 +1,20 @@
+version: "3.8"
+services:
+  dev:
+    image: mcr.microsoft.com/devcontainers/go:1-1.23-bookworm
+    volumes:
+      - ../..:/workspaces/go_auth # Mounts your local project inside the container
+    command: sleep infinity
+    networks:
+      - dev-network
+    depends_on:
+      - redis
+  redis:
+    image: redis:latest
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - dev-network
+networks:
+  dev-network:
