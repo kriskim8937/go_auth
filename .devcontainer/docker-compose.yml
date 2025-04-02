@@ -3,7 +3,7 @@ services:
   dev:
     image: mcr.microsoft.com/devcontainers/go:1-1.23-bookworm
     volumes:
-      - ../..:/workspaces/go_auth # Mounts your local project inside the container
+      - ..:/workspace # Mounts your local project directly inside the container
     command: sleep infinity
     networks:
       - dev-network

@@ -2,6 +2,6 @@
 	"name": "Go",
 	"dockerComposeFile": "docker-compose.yml",
 	"service": "dev",
-	"workspaceFolder": "/workspaces/go_auth",
+	"workspaceFolder": "/workspace",
 	"forwardPorts": [6379]
   }
