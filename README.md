@@ -1,30 +1,30 @@
 # AuthFlow - OAuth 2.1 Authentication Service
 
 ## Overview
-This project provides an OAuth 2.1 authentication and authorization system using Go and Redis as the backend for token storage. It follows the Authorization Code Flow, allowing secure authentication and access token management.
+AuthFlow is a robust OAuth 2.1 authentication and authorization service built with Go and Redis for token storage. It implements the Authorization Code Flow to provide secure user authentication and effective access token management.
 
 ## Features
 ### 1. Authorization Code Flow
-Supports client authorization requests via /auth/authorize
-Redirects users to the specified callback URL with an authorization code
+- Supports client authorization requests via the `/auth/authorize` endpoint.
+- Redirects users to the specified callback URL with an authorization code.
 
 ### 2. Token Exchange
-Clients can exchange an authorization code for an access token via /auth/token
-Implements OAuth-compliant token generation
+- Clients can exchange the authorization code for an access token via the `/auth/token` endpoint.
+- Implements OAuth-compliant token generation.
 
 ### 3. Access Token Usage
-Supports Bearer token authentication for API access
-Provides a /auth/userinfo endpoint to retrieve user information using the access token
+- Supports Bearer token authentication for API access.
+- Provides a `/auth/userinfo` endpoint to retrieve user information using the access token.
 
 ### 4. Security & Best Practices
-Uses Redis for token storage, ensuring efficient and scalable session management
-Follows standard OAuth 2.0 flows for secure authentication
+- Utilizes Redis for efficient and scalable token storage.
+- Follows standard OAuth 2.0 flows for secure authentication.
 
 ## End-to-End Test
-The E2E test verifies:
-1. Authorization Request – Ensuring proper redirection with an authorization code
-2. Token Exchange – Validating token generation upon code exchange
-3. Token Usage – Ensuring valid access token retrieval of user info
+The E2E tests verify the following:
+1. **Authorization Request**: Ensures proper redirection with an authorization code.
+2. **Token Exchange**: Validates token generation upon code exchange.
+3. **Token Usage**: Confirms valid access token retrieval of user information.
 
 ## Project Structure
 ```
@@ -39,7 +39,7 @@ authflow/
 │── .env                   # Environment variables
 │── go.mod                 # Go module file
 │── main.go                # Entry point
-│── README.md              # Documentation
+└── README.md              # Documentation
 ```
 
 ## Installation
@@ -49,19 +49,13 @@ authflow/
 - Reddis
 
 ### Setup
-1. Clone the repository:
+1. Open VSCode and create a new empty folder.
+2. Clone the repository:
    ```sh
-   git clone https://github.com/yourusername/authflow.git
-   cd authflow
+   git clone https://github.com/kriskim8937/go_auth.git
    ```
-2. Set up environment variables in `.env`:
-   ```sh
-   cp .env.example .env
-   ```
-3. Build and run the service:
-   ```sh
-   go run main.go
-   ```
+3. Open the Command Palette by pressing Ctrl + Shift + P and select "Rebuild Container Without Cache" to set up the development environment.
+4. The Redis service will start automatically. Once it is running, you can execute the end-to-end (E2E) tests.
 
 ## API Endpoints
 | Method | Endpoint     | Description |
@@ -69,12 +63,6 @@ authflow/
 | GET    | `/auth`     | Authorization endpoint |
 | POST   | `/token`    | Token issuance |
 | GET    | `/userinfo` | User information retrieval |
-
-## Deployment
-To deploy using Docker:
-```sh
-docker-compose up --build
-```
 
 ## Contributing
 Contributions are welcome! Please open an issue or submit a pull request.
