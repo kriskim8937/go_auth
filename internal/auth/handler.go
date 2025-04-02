@@ -1,6 +1,9 @@
 package auth
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"net/http"
 	"strings"
 
@@ -40,18 +43,21 @@ func (h *Handler) UserInfo(c *gin.Context) {
 }
 
 type AuthorizationRequest struct {
-	ClientID     string `form:"client_id" binding:"required"`
-	RedirectURI  string `form:"redirect_uri" binding:"required"`
-	ResponseType string `form:"response_type" binding:"required"`
-	Scope        string `form:"scope"`
-	State        string `form:"state"`
+	ClientID            string `form:"client_id" binding:"required"`
+	RedirectURI         string `form:"redirect_uri" binding:"required"`
+	ResponseType        string `form:"response_type" binding:"required"`
+	Scope               string `form:"scope"`
+	State               string `form:"state"`
+	CodeChallenge       string `form:"code_challenge" binding:"required"`        // PKCE: Client sends hash
+	CodeChallengeMethod string `form:"code_challenge_method" binding:"required"` // "S256" or "plain"
 }
 
 type TokenRequest struct {
-	GrantType   string `form:"grant_type" binding:"required"`
-	Code        string `form:"code" binding:"required"`
-	ClientID    string `form:"client_id" binding:"required"`
-	RedirectURI string `form:"redirect_uri" binding:"required"`
+	GrantType    string `form:"grant_type" binding:"required"`
+	Code         string `form:"code" binding:"required"`
+	ClientID     string `form:"client_id" binding:"required"`
+	RedirectURI  string `form:"redirect_uri" binding:"required"`
+	CodeVerifier string `form:"code_verifier" binding:"required"` // PKCE: Client sends original secret
 }
 
 type TokenResponse struct {
@@ -68,21 +74,26 @@ func (h *Handler) Authorize(c *gin.Context) {
 		return
 	}
 
+	// Validate PKCE method (only S256 is secure)
+	if request.CodeChallengeMethod != "S256" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported_challenge_method"})
+		return
+	}
+
 	if !isValidClient(request.ClientID) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid client"})
 		return
 	}
 
-	// Generate and store authorization code
+	// Store code_challenge (linked to the auth code)
 	code := uuid.New().String()
-	h.Service.StoreAuthorizationCode(code, request.ClientID)
+	h.Service.StoreAuthorizationCode(code, request.ClientID, request.CodeChallenge) // Updated function
 
-	// Redirect user with the code
+	// Redirect with code
 	redirectURL := request.RedirectURI + "?code=" + code
 	if request.State != "" {
 		redirectURL += "&state=" + request.State
 	}
-
 	c.Redirect(http.StatusFound, redirectURL)
 }
 
@@ -115,15 +126,22 @@ func (h *Handler) Token(c *gin.Context) {
 }
 
 func (h *Handler) handleAuthorizationCodeGrant(c *gin.Context, request TokenRequest) {
-	if !h.Service.ValidateAndRemoveAuthorizationCode(request.Code, request.ClientID) {
+	// Retrieve stored code_challenge for this auth code
+	codeChallenge, isValid := h.Service.ValidateAndRemoveAuthorizationCode(request.Code, request.ClientID)
+	if !isValid {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired authorization code"})
 		return
 	}
 
-	// Generate and store access token
-	accessToken := uuid.New().String()
-	expiresIn := int64(3600)
+	// Verify PKCE: Compare code_verifier vs. stored code_challenge
+	if !VerifyPKCE(codeChallenge, request.CodeVerifier) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_code_verifier"})
+		return
+	}
 
+	// Generate and return tokens (same as before)
+	accessToken := GenerateSecureToken(32)
+	expiresIn := int64(3600)
 	h.Service.StoreAccessToken(accessToken, request.ClientID, expiresIn)
 
 	c.JSON(http.StatusOK, TokenResponse{
@@ -131,6 +149,21 @@ func (h *Handler) handleAuthorizationCodeGrant(c *gin.Context, request TokenRequ
 		TokenType:   "Bearer",
 		ExpiresIn:   expiresIn,
 	})
+}
+
+func GenerateSecureToken(length int) string {
+	b := make([]byte, length)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	return base64.URLEncoding.EncodeToString(b)
+}
+
+func VerifyPKCE(codeChallenge, codeVerifier string) bool {
+	// Default: S256 (recommended)
+	hash := sha256.Sum256([]byte(codeVerifier))
+	encoded := base64.RawURLEncoding.EncodeToString(hash[:])
+	return encoded == codeChallenge
 }
 
 func (h *Handler) handleClientCredentialsGrant(c *gin.Context) {
