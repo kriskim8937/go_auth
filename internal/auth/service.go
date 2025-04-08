@@ -27,12 +27,13 @@ const (
 	AuthCodeTTL             = 10 * time.Minute
 )
 
-// StoreAuthorizationCode stores an authorization code and its PKCE code_challenge in Redis
-func (s *Service) StoreAuthorizationCode(code, clientID, codeChallenge string) error {
+// StoreAuthorizationCode stores an authorization code, its PKCE code_challenge, and userID in Redis
+func (s *Service) StoreAuthorizationCode(code, clientID, codeChallenge, userID string) error {
 	ctx := context.Background()
 	data := map[string]interface{}{
 		"client_id":      clientID,
 		"code_challenge": codeChallenge,
+		"user_id":        userID,
 	}
 
 	err := s.RedisClient.HSet(ctx, "auth_code:"+code, data).Err()
@@ -43,19 +44,23 @@ func (s *Service) StoreAuthorizationCode(code, clientID, codeChallenge string) e
 }
 
 // ValidateAndRemoveAuthorizationCode validates the code and returns the stored code_challenge
-func (s *Service) ValidateAndRemoveAuthorizationCode(code, clientID string) (string, bool) {
+func (s *Service) ValidateAndRemoveAuthorizationCode(code, clientID string) (string, string, bool) {
 	ctx := context.Background()
 	key := "auth_code:" + code
 
 	// Get all fields from the hash
 	result, err := s.RedisClient.HGetAll(ctx, key).Result()
 	if err != nil || result["client_id"] != clientID {
-		return "", false
+		return "", "", false
 	}
+
+	// Get userID before deleting
+	userID := result["user_id"]
+	challenge := result["code_challenge"]
 
 	// Delete the code after validation
 	s.RedisClient.Del(ctx, key)
-	return result["code_challenge"], true
+	return challenge, userID, true
 }
 
 // VerifyPKCE validates a code_verifier against a code_challenge
@@ -70,10 +75,11 @@ func (s *Service) VerifyPKCE(codeChallenge, codeVerifier string) bool {
 }
 
 // StoreAccessToken saves an access token with metadata
-func (s *Service) StoreAccessToken(token, clientID string, expiresIn int64) error {
+func (s *Service) StoreAccessToken(token, clientID, userID string, expiresIn int64) error {
 	ctx := context.Background()
 	data := map[string]interface{}{
 		"client_id": clientID,
+		"user_id":   userID,
 	}
 
 	err := s.RedisClient.HSet(ctx, "access_token:"+token, data).Err()
@@ -94,22 +100,32 @@ func (s *Service) ValidateAccessToken(token string) (map[string]string, error) {
 }
 
 // StoreRefreshToken stores a refresh token with a longer expiry
+// In your service, make sure StoreRefreshToken includes expiration:
 func (s *Service) StoreRefreshToken(token, clientID, userID string, expiresIn int64) error {
 	ctx := context.Background()
 	data := map[string]interface{}{
 		"client_id": clientID,
 		"user_id":   userID,
 	}
-	_, err := s.RedisClient.HSet(ctx, "refresh_token:"+token, data).Result()
-	return err
+
+	err := s.RedisClient.HSet(ctx, "refresh_token:"+token, data).Err()
+	if err != nil {
+		return err
+	}
+	return s.RedisClient.Expire(ctx, "refresh_token:"+token, time.Duration(expiresIn)*time.Second).Err()
 }
 
 // ValidateRefreshToken validates a refresh token
 func (s *Service) ValidateRefreshToken(token, clientID string) (string, bool) {
 	ctx := context.Background()
 	result, err := s.RedisClient.HGetAll(ctx, "refresh_token:"+token).Result()
-	if err != nil || result["client_id"] != clientID {
+	if err != nil || len(result) == 0 {
 		return "", false
 	}
+
+	if result["client_id"] != clientID {
+		return "", false
+	}
+
 	return result["user_id"], true
 }

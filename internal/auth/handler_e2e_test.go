@@ -18,9 +18,10 @@ import (
 )
 
 type TokenResponse struct {
-	AccessToken string `json:"access_token"`
-	TokenType   string `json:"token_type"`
-	ExpiresIn   int64  `json:"expires_in"`
+	AccessToken  string `json:"access_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int64  `json:"expires_in"`
+	RefreshToken string `json:"refresh_token,omitempty"`
 }
 
 func TestE2EOAuthFlowWithPKCE(t *testing.T) {
@@ -29,6 +30,7 @@ func TestE2EOAuthFlowWithPKCE(t *testing.T) {
 	r := setupRouter(handler)
 
 	// Generate PKCE code verifier and challenge
+
 	codeVerifier := "somerandomstring_verifier_1234567890abcdefghijklmnopqrstuvwxyz"
 	hash := sha256.Sum256([]byte(codeVerifier))
 	codeChallenge := base64.RawURLEncoding.EncodeToString(hash[:])
@@ -43,6 +45,7 @@ func TestE2EOAuthFlowWithPKCE(t *testing.T) {
 			"code_challenge":        {codeChallenge},
 			"code_challenge_method": {"S256"},
 			"state":                 {"test_state"},
+			"scope":                 {"openid profile email"},
 		}.Encode(),
 		nil,
 	)
@@ -73,8 +76,10 @@ func TestE2EOAuthFlowWithPKCE(t *testing.T) {
 		"code":          {code},
 		"client_id":     {"client_id_1"},
 		"redirect_uri":  {"http://localhost/callback"},
-		"code_verifier": {codeVerifier}, // PKCE verifier
+		"code_verifier": {codeVerifier},
 	}
+
+	fmt.Printf("Making token request with body: %v\n", tokenReqBody) // Debug log
 
 	tokenReq, _ := http.NewRequest(
 		"POST",
@@ -82,12 +87,14 @@ func TestE2EOAuthFlowWithPKCE(t *testing.T) {
 		strings.NewReader(tokenReqBody.Encode()),
 	)
 	tokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	// Add client authentication if required
 	tokenReq.SetBasicAuth("client_id_1", "client_secret_1")
+
+	fmt.Printf("Request: %+v\n", tokenReq) // Debug log
 
 	tokenRec := httptest.NewRecorder()
 	r.ServeHTTP(tokenRec, tokenReq)
+
+	fmt.Printf("Response: %d - %s\n", tokenRec.Code, tokenRec.Body.String())
 
 	assert.Equal(t, http.StatusOK, tokenRec.Code, "Token request should succeed")
 
@@ -108,9 +115,73 @@ func TestE2EOAuthFlowWithPKCE(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, userInfoRec.Code, "UserInfo request should succeed")
 
-	var userInfo map[string]map[string]interface{}
+	// Parse the response properly
+	var userInfo map[string]interface{}
 	err = json.Unmarshal(userInfoRec.Body.Bytes(), &userInfo)
 	require.NoError(t, err, "Should decode user info correctly")
-	fmt.Println(userInfo)
-	assert.Equal(t, "client_id_1", userInfo["user"]["client_id"], "Should include client ID")
+
+	// Verify the expected fields
+	assert.Equal(t, "test_user", userInfo["sub"], "Should include correct user ID")
+	assert.Equal(t, "client_id_1", userInfo["client_id"], "Should include client ID")
+	// --- Step 4: Refresh Token Flow ---
+
+	// Parse refresh_token from response (already included now)
+	var refreshToken string
+	err = json.Unmarshal(tokenRec.Body.Bytes(), &tokenResponse)
+	require.NoError(t, err)
+	refreshToken = tokenResponse.RefreshToken
+	assert.NotEmpty(t, refreshToken, "Refresh token should be provided")
+
+	// Request new access token using refresh_token
+	// In your test function, update the refresh token request:
+	refreshReqBody := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {refreshToken},
+		"client_id":     {"client_id_1"},
+	}
+
+	refreshReq, _ := http.NewRequest(
+		"POST",
+		"/auth/token",
+		strings.NewReader(refreshReqBody.Encode()),
+	)
+	refreshReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	// If you're using client authentication:
+	refreshReq.SetBasicAuth("client_id_1", "client_secret_1")
+
+	refreshRec := httptest.NewRecorder()
+	r.ServeHTTP(refreshRec, refreshReq)
+
+	assert.Equal(t, http.StatusOK, refreshRec.Code, "Refresh token exchange should succeed")
+
+	var refreshed TokenResponse
+	err = json.Unmarshal(refreshRec.Body.Bytes(), &refreshed)
+	require.NoError(t, err, "Should decode refreshed token response")
+
+	assert.NotEmpty(t, refreshed.AccessToken, "New access token should be provided")
+	assert.NotEmpty(t, refreshed.RefreshToken, "New refresh token should be provided")
+	// Use new access token
+	userInfoReq2, _ := http.NewRequest("GET", "/auth/userinfo", nil)
+	userInfoReq2.Header.Set("Authorization", "Bearer "+refreshed.AccessToken)
+
+	userInfoRec2 := httptest.NewRecorder()
+	r.ServeHTTP(userInfoRec2, userInfoReq2)
+
+	assert.Equal(t, http.StatusOK, userInfoRec2.Code, "UserInfo should succeed with new token")
+
+	// --- Step 5: Reuse Old Refresh Token (Should Fail) ---
+	refreshReqInvalid := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {refreshToken}, // Old token
+		"client_id":     {"client_id_1"},
+	}
+	refreshReqFail, _ := http.NewRequest("POST", "/auth/token", strings.NewReader(refreshReqInvalid.Encode()))
+	refreshReqFail.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	refreshReqFail.SetBasicAuth("client_id_1", "client_secret_1")
+
+	refreshRecFail := httptest.NewRecorder()
+	r.ServeHTTP(refreshRecFail, refreshReqFail)
+
+	assert.Equal(t, http.StatusUnauthorized, refreshRecFail.Code, "Old refresh token should be invalidated")
 }

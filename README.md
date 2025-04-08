@@ -4,7 +4,7 @@
 AuthFlow is a robust OAuth 2.1 authentication and authorization service built with Go and Redis for token storage. It implements the Authorization Code Flow to provide secure user authentication and effective access token management.
 
 ## Features
-### 1. Authorization Code Flow
+### 1. Authorization Code Flow with PKCE
 - Supports client authorization requests via the `/auth/authorize` endpoint.
 - Redirects users to the specified callback URL with an authorization code.
 
@@ -25,6 +25,41 @@ The E2E tests verify the following:
 1. **Authorization Request**: Ensures proper redirection with an authorization code.
 2. **Token Exchange**: Validates token generation upon code exchange.
 3. **Token Usage**: Confirms valid access token retrieval of user information.
+
+## OAuth 2.1 PKCE Flow
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Test
+    participant AuthServer
+    participant TokenEndpoint
+    participant UserInfo
+    participant Redis
+    
+    Note over Client,Test: Authorization Phase
+    Client->>Test: Start test
+    Test->>AuthServer: GET /auth/authorize
+    AuthServer->>Redis: Store auth_code
+    AuthServer-->>Test: 302 Redirect
+    
+    Note over Test,TokenEndpoint: Token Exchange
+    Test->>TokenEndpoint: POST /auth/token
+    TokenEndpoint->>Redis: Validate code
+    Redis-->>TokenEndpoint: user_id
+    TokenEndpoint->>Redis: Store tokens
+    TokenEndpoint-->>Test: 200 OK
+    
+    Note over Test,UserInfo: UserInfo Phase
+    Test->>UserInfo: GET /auth/userinfo
+    UserInfo->>Redis: Validate token
+    UserInfo-->>Test: 200 OK
+    
+    Note over Test,TokenEndpoint: Refresh Token
+    Test->>TokenEndpoint: POST /auth/token
+    TokenEndpoint->>Redis: Validate refresh
+    TokenEndpoint->>Redis: Invalidate old
+    TokenEndpoint-->>Test: New tokens
+```
 
 ## Project Structure
 ```

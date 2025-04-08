@@ -1,9 +1,13 @@
 package auth
 
 import (
+	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -33,13 +37,17 @@ func (h *Handler) UserInfo(c *gin.Context) {
 	}
 
 	accessToken := parts[1]
-	userInfo, err := h.Service.ValidateAccessToken(accessToken)
+	tokenInfo, err := h.Service.ValidateAccessToken(accessToken)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
 		return
 	}
-
-	c.JSON(http.StatusOK, gin.H{"user": userInfo})
+	c.JSON(http.StatusOK, gin.H{
+		"sub":       tokenInfo["user_id"],
+		"client_id": tokenInfo["client_id"],
+		"name":      "Test User",
+		"email":     "test@example.com",
+	})
 }
 
 type AuthorizationRequest struct {
@@ -54,16 +62,18 @@ type AuthorizationRequest struct {
 
 type TokenRequest struct {
 	GrantType    string `form:"grant_type" binding:"required"`
-	Code         string `form:"code" binding:"required"`
+	Code         string `form:"code"` // Not required for refresh_token
 	ClientID     string `form:"client_id" binding:"required"`
-	RedirectURI  string `form:"redirect_uri" binding:"required"`
-	CodeVerifier string `form:"code_verifier" binding:"required"` // PKCE: Client sends original secret
+	RedirectURI  string `form:"redirect_uri"`  // Not required for refresh_token
+	CodeVerifier string `form:"code_verifier"` // Not required for refresh_token
+	RefreshToken string `form:"refresh_token"` // Required for refresh_token
 }
 
 type TokenResponse struct {
-	AccessToken string `json:"access_token"`
-	TokenType   string `json:"token_type"`
-	ExpiresIn   int64  `json:"expires_in"`
+	AccessToken  string `json:"access_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int64  `json:"expires_in"`
+	RefreshToken string `json:"refresh_token,omitempty"`
 }
 
 // Authorize handles the authorization code flow
@@ -73,6 +83,14 @@ func (h *Handler) Authorize(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
 		return
 	}
+
+	// Simulate authenticated user session
+	userID, ok := c.Request.Context().Value("user_id").(string)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+	c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), "user_id", userID))
 
 	// Validate PKCE method (only S256 is secure)
 	if request.CodeChallengeMethod != "S256" {
@@ -85,9 +103,12 @@ func (h *Handler) Authorize(c *gin.Context) {
 		return
 	}
 
-	// Store code_challenge (linked to the auth code)
+	// Store code_challenge and userID (linked to the auth code)
 	code := uuid.New().String()
-	h.Service.StoreAuthorizationCode(code, request.ClientID, request.CodeChallenge) // Updated function
+	if err := h.Service.StoreAuthorizationCode(code, request.ClientID, request.CodeChallenge, userID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store authorization code"})
+		return
+	}
 
 	// Redirect with code
 	redirectURL := request.RedirectURI + "?code=" + code
@@ -120,35 +141,106 @@ func (h *Handler) Token(c *gin.Context) {
 		h.handleAuthorizationCodeGrant(c, request)
 	case "client_credentials":
 		h.handleClientCredentialsGrant(c)
+	case "refresh_token":
+		h.handleRefreshTokenGrant(c)
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported_grant_type"})
 	}
 }
 
 func (h *Handler) handleAuthorizationCodeGrant(c *gin.Context, request TokenRequest) {
-	// Retrieve stored code_challenge for this auth code
-	codeChallenge, isValid := h.Service.ValidateAndRemoveAuthorizationCode(request.Code, request.ClientID)
+	// Validate and remove auth code - now returns userID too
+	codeChallenge, userID, isValid := h.Service.ValidateAndRemoveAuthorizationCode(request.Code, request.ClientID)
 	if !isValid {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired authorization code"})
 		return
 	}
 
-	// Verify PKCE: Compare code_verifier vs. stored code_challenge
+	// Verify PKCE
 	if !VerifyPKCE(codeChallenge, request.CodeVerifier) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_code_verifier"})
 		return
 	}
 
-	// Generate and return tokens (same as before)
+	// Generate tokens
 	accessToken := GenerateSecureToken(32)
+	refreshToken := GenerateSecureToken(32)
 	expiresIn := int64(3600)
-	h.Service.StoreAccessToken(accessToken, request.ClientID, expiresIn)
+
+	// Store tokens with userID
+	if err := h.Service.StoreAccessToken(accessToken, request.ClientID, userID, expiresIn); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store access token"})
+		return
+	}
+
+	if err := h.Service.StoreRefreshToken(refreshToken, request.ClientID, userID, 24*3600); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store refresh token"})
+		return
+	}
 
 	c.JSON(http.StatusOK, TokenResponse{
-		AccessToken: accessToken,
-		TokenType:   "Bearer",
-		ExpiresIn:   expiresIn,
+		AccessToken:  accessToken,
+		TokenType:    "Bearer",
+		ExpiresIn:    expiresIn,
+		RefreshToken: refreshToken,
 	})
+}
+
+func (h *Handler) handleRefreshTokenGrant(c *gin.Context) {
+	fmt.Println("Refresh token request received")
+	body, _ := io.ReadAll(c.Request.Body)
+	fmt.Printf("Request body: %s\n", string(body))
+	c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
+	type refreshRequest struct {
+		GrantType    string `form:"grant_type" binding:"required"`
+		RefreshToken string `form:"refresh_token" binding:"required"`
+		ClientID     string `form:"client_id" binding:"required"`
+	}
+
+	var req refreshRequest
+	if err := c.ShouldBind(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
+		return
+	}
+
+	userID, isValid := h.Service.ValidateRefreshToken(req.RefreshToken, req.ClientID)
+	if !isValid {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_grant"})
+		return
+	}
+
+	// Invalidate old token
+	if err := h.Service.DeleteRefreshToken(req.RefreshToken); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "server_error"})
+		return
+	}
+
+	// Generate new tokens
+	accessToken := GenerateSecureToken(32)
+	newRefreshToken := GenerateSecureToken(32)
+	expiresIn := int64(3600) // 1 hour
+
+	// Store new tokens
+	if err := h.Service.StoreAccessToken(accessToken, req.ClientID, userID, expiresIn); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "server_error"})
+		return
+	}
+	if err := h.Service.StoreRefreshToken(newRefreshToken, req.ClientID, userID, 24*3600); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "server_error"})
+		return
+	}
+
+	c.JSON(http.StatusOK, TokenResponse{
+		AccessToken:  accessToken,
+		TokenType:    "Bearer",
+		ExpiresIn:    expiresIn,
+		RefreshToken: newRefreshToken,
+	})
+}
+
+func (s *Service) DeleteRefreshToken(token string) error {
+	ctx := context.Background()
+	return s.RedisClient.Del(ctx, "refresh_token:"+token).Err()
 }
 
 func GenerateSecureToken(length int) string {
@@ -156,7 +248,7 @@ func GenerateSecureToken(length int) string {
 	if _, err := rand.Read(b); err != nil {
 		panic(err)
 	}
-	return base64.URLEncoding.EncodeToString(b)
+	return base64.RawURLEncoding.EncodeToString(b)
 }
 
 func VerifyPKCE(codeChallenge, codeVerifier string) bool {
